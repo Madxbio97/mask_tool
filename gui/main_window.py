@@ -2,9 +2,11 @@
 import os
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QFileDialog,
-                             QProgressBar, QTextEdit, QMessageBox, QTabWidget)
+                             QProgressBar, QTextEdit, QMessageBox, QTabWidget,
+                             QComboBox)
 from PyQt5.QtGui import QFont
 
+from config import MATCH_METHODS, DEFAULT_METHOD
 from workers.match_worker import WorkerMatch
 from workers.upscale_worker import WorkerUpscale
 
@@ -34,6 +36,7 @@ class MainWindow(QMainWindow):
     def setup_tab1(self, parent):
         layout = QVBoxLayout(parent)
 
+        # Директория с фонами
         bg_layout = QHBoxLayout()
         bg_layout.addWidget(QLabel("Фоны (оригинал):"))
         self.bg_edit = QLineEdit()
@@ -43,6 +46,7 @@ class MainWindow(QMainWindow):
         bg_layout.addWidget(self.bg_btn)
         layout.addLayout(bg_layout)
 
+        # Директория с масками
         mask_layout = QHBoxLayout()
         mask_layout.addWidget(QLabel("Маски (оригинал):"))
         self.mask_edit = QLineEdit()
@@ -52,6 +56,20 @@ class MainWindow(QMainWindow):
         mask_layout.addWidget(self.mask_btn)
         layout.addLayout(mask_layout)
 
+        # Выбор метода сравнения
+        method_layout = QHBoxLayout()
+        method_layout.addWidget(QLabel("Метод сравнения:"))
+        self.method_combo = QComboBox()
+        for display_name in MATCH_METHODS.keys():
+            self.method_combo.addItem(display_name)
+        # Устанавливаем метод по умолчанию
+        default_display = [k for k, v in MATCH_METHODS.items() if v == DEFAULT_METHOD][0]
+        self.method_combo.setCurrentText(default_display)
+        method_layout.addWidget(self.method_combo)
+        method_layout.addStretch()
+        layout.addLayout(method_layout)
+
+        # Выходной CSV
         out_layout = QHBoxLayout()
         out_layout.addWidget(QLabel("Результат CSV:"))
         self.out_edit = QLineEdit("result.csv")
@@ -61,10 +79,12 @@ class MainWindow(QMainWindow):
         out_layout.addWidget(self.out_btn)
         layout.addLayout(out_layout)
 
+        # Кнопка запуска
         self.start_btn1 = QPushButton("Старт")
         self.start_btn1.clicked.connect(self.start_matching)
         layout.addWidget(self.start_btn1)
 
+        # Прогресс-бар и лог
         self.progress1 = QProgressBar()
         layout.addWidget(self.progress1)
         self.log1 = QTextEdit()
@@ -92,6 +112,8 @@ class MainWindow(QMainWindow):
         bg_dir = self.bg_edit.text().strip()
         mask_dir = self.mask_edit.text().strip()
         out_file = self.out_edit.text().strip()
+        method_display = self.method_combo.currentText()
+        method = MATCH_METHODS.get(method_display, DEFAULT_METHOD)
 
         if not bg_dir or not os.path.isdir(bg_dir):
             QMessageBox.warning(self, "Ошибка", "Укажите существующую директорию с фонами.")
@@ -107,7 +129,7 @@ class MainWindow(QMainWindow):
         self.progress1.setValue(0)
         self.log1.clear()
 
-        self.worker = WorkerMatch(bg_dir, mask_dir, out_file)
+        self.worker = WorkerMatch(bg_dir, mask_dir, out_file, method)
         self.worker.progress.connect(self.progress1.setValue)
         self.worker.log.connect(self.log1.append)
         self.worker.finished.connect(self.on_match_finished)
@@ -123,7 +145,7 @@ class MainWindow(QMainWindow):
         self.worker = None
 
     # ------------------------------------------------------------------
-    # Вкладка 2
+    # Вкладка 2 (без изменений)
     # ------------------------------------------------------------------
     def setup_tab2(self, parent):
         layout = QVBoxLayout(parent)

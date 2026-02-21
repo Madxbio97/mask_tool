@@ -5,8 +5,8 @@ import numpy as np
 import random
 from PyQt5.QtCore import QThread, pyqtSignal
 
-from config import ERROR_THRESHOLD, TILE_SIZE
-from utils.image_processing import refine_tile_position
+from config import ERROR_THRESHOLD, TILE_SIZE, MATCH_METHODS
+from utils.image_processing import find_tile
 
 
 class WorkerMatch(QThread):
@@ -14,11 +14,12 @@ class WorkerMatch(QThread):
     log = pyqtSignal(str)
     finished = pyqtSignal(bool, str)
 
-    def __init__(self, bg_dir, mask_dir, output_file):
+    def __init__(self, bg_dir, mask_dir, output_file, method="sqdiff_refine"):
         super().__init__()
         self.bg_dir = bg_dir
         self.mask_dir = mask_dir
         self.output_file = output_file
+        self.method = method
 
     def run(self):
         try:
@@ -90,7 +91,7 @@ class WorkerMatch(QThread):
 
                 self.log.emit(f"  Найдено тайлов: {len(tiles)}")
 
-                # Определяем фон по нескольким тайлам
+                # Определяем фон по нескольким тайлам (всегда используем sqdiff_refine для надёжности)
                 num_samples = min(5, len(tiles))
                 sample_indices = random.sample(range(len(tiles)), num_samples)
                 sample_tiles = [tiles[i] for i in sample_indices]
@@ -101,10 +102,12 @@ class WorkerMatch(QThread):
                 for (tx, ty) in sample_tiles:
                     tile_rgb = mask_img[ty:ty+TILE_SIZE, tx:tx+TILE_SIZE, :3]
                     tile_alpha = alpha[ty:ty+TILE_SIZE, tx:tx+TILE_SIZE]
-                    tile_mask_cv = (tile_alpha > 0).astype(np.uint8) * 255
+                    # Для определения фона используем быстрый sqdiff_refine
                     best_bg = None
                     best_error = float('inf')
                     for bg_name, bg_img in backgrounds:
+                        # Грубый поиск через matchTemplate
+                        tile_mask_cv = (tile_alpha > 0).astype(np.uint8) * 255
                         result = cv2.matchTemplate(bg_img, tile_rgb, cv2.TM_SQDIFF, mask=tile_mask_cv)
                         min_val, _, _, _ = cv2.minMaxLoc(result)
                         if min_val < best_error:
@@ -129,14 +132,12 @@ class WorkerMatch(QThread):
                 self.log.emit(f"  Фон определен: {best_bg} (голосов {bg_votes[best_bg]})")
                 bg_img = next(bg for name, bg in backgrounds if name == best_bg)
 
-                # Для всех тайлов выполняем точный поиск с уточнением
+                # Для всех тайлов выполняем поиск выбранным методом
                 for (tx, ty) in tiles:
                     tile_rgb = mask_img[ty:ty+TILE_SIZE, tx:tx+TILE_SIZE, :3]
                     tile_alpha = alpha[ty:ty+TILE_SIZE, tx:tx+TILE_SIZE]
-                    tile_mask_cv = (tile_alpha > 0).astype(np.uint8) * 255
-                    result = cv2.matchTemplate(bg_img, tile_rgb, cv2.TM_SQDIFF, mask=tile_mask_cv)
-                    min_val, _, min_loc, _ = cv2.minMaxLoc(result)
-                    refined_pos, refined_error = refine_tile_position(tile_rgb, tile_alpha, bg_img, min_loc, search_radius=4)
+
+                    refined_pos, refined_error = find_tile(tile_rgb, tile_alpha, bg_img, method=self.method)
 
                     if refined_pos is None or refined_error > ERROR_THRESHOLD:
                         self.log.emit(f"  Тайл ({tx},{ty}) не найден на фоне (ошибка {refined_error:.2f})")
